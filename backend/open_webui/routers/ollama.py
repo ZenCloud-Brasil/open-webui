@@ -124,6 +124,7 @@ async def send_post_request(
     key: Optional[str] = None,
     content_type: Optional[str] = None,
     user: UserModel = None,
+    metadata: Optional[dict] = None,
 ):
 
     r = None
@@ -144,6 +145,11 @@ async def send_post_request(
                         "X-OpenWebUI-User-Id": user.id,
                         "X-OpenWebUI-User-Email": user.email,
                         "X-OpenWebUI-User-Role": user.role,
+                        **(
+                            {"X-OpenWebUI-Chat-Id": metadata.get("chat_id")}
+                            if metadata and metadata.get("chat_id")
+                            else {}
+                        ),
                     }
                     if ENABLE_FORWARD_USER_INFO_HEADERS and user
                     else {}
@@ -185,7 +191,6 @@ async def send_post_request(
             )
         else:
             res = await r.json()
-            await cleanup_response(r, session)
             return res
 
     except HTTPException as e:
@@ -197,6 +202,9 @@ async def send_post_request(
             status_code=r.status if r else 500,
             detail=detail if e else "Harko AI: Server Connection Error",
         )
+    finally:
+        if not stream:
+            await cleanup_response(r, session)
 
 
 def get_api_key(idx, url, configs):
@@ -1388,6 +1396,7 @@ async def generate_chat_completion(
             url_idx, url, request.app.state.config.OLLAMA_API_CONFIGS),
         content_type="application/x-ndjson",
         user=user,
+        metadata=metadata,
     )
 
 
@@ -1426,6 +1435,8 @@ async def generate_openai_completion(
     url_idx: Optional[int] = None,
     user=Depends(get_verified_user),
 ):
+    metadata = form_data.pop("metadata", None)
+
     try:
         form_data = OpenAICompletionForm(**form_data)
     except Exception as e:
@@ -1493,6 +1504,7 @@ async def generate_openai_completion(
         key=get_api_key(
             url_idx, url, request.app.state.config.OLLAMA_API_CONFIGS),
         user=user,
+        metadata=metadata,
     )
 
 
@@ -1578,6 +1590,7 @@ async def generate_openai_chat_completion(
         key=get_api_key(
             url_idx, url, request.app.state.config.OLLAMA_API_CONFIGS),
         user=user,
+        metadata=metadata,
     )
 
 
