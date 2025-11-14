@@ -1,0 +1,28 @@
+version: "3.9"
+
+services:
+  open-webui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: open-webui
+    restart: unless-stopped
+    environment:
+      - WEBUI_SECRET_KEY='zJsRn6zPPAkXpzN0P/bXu0qmWioWLWOzHQGVVL7Dr2U='
+      - PORT=8088
+      - HOST=0.0.0.0
+    volumes:
+      - open-webui:/app/backend/data
+    ports:
+      - "8088:8088" # Porta interna exposta para o HAProxy
+    command: >
+      bash start.sh
+    networks:
+      - web
+
+volumes:
+  open-webui:
+
+networks:
+  web:
+    driver: bridge

@@ -50,7 +50,7 @@ ARG GID
 
 ## Basis ##
 ENV ENV=prod \
-    PORT=8080 \
+    PORT=8088 \
     # pass build args to the build
     USE_OLLAMA_DOCKER=${USE_OLLAMA} \
     USE_CUDA_DOCKER=${USE_CUDA} \
@@ -156,9 +156,9 @@ COPY --chown=$UID:$GID --from=build /app/package.json /app/package.json
 # copy backend files
 COPY --chown=$UID:$GID ./backend .
 
-EXPOSE 8080
+EXPOSE 8088
 
-HEALTHCHECK CMD curl --silent --fail http://localhost:${PORT:-8080}/health | jq -ne 'input.status == true' || exit 1
+HEALTHCHECK CMD curl --silent --fail http://localhost:${PORT:-8088}/health | jq -ne 'input.status == true' || exit 1
 
 # Minimal, atomic permission hardening for OpenShift (arbitrary UID):
 # - Group 0 owns /app and /root

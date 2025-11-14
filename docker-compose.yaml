@@ -1,42 +1,75 @@
+version: "3.9"
+
 services:
   traefik:
     image: traefik:v2.9
     container_name: traefik
+    restart: unless-stopped
     ports:
-      - "80:80" # Porta HTTP
-      - "443:443" # Porta HTTPS
+      - "80:80"     # HTTP -> redireciona para HTTPS
+      - "443:443"   # HTTPS direto
+      - "8080:8080" # Dashboard
     command:
-      - "--providers.docker=true" # Habilitar Docker como provider
-      - "--entrypoints.web.address=:80" # Configuração para entrada HTTP
-      - "--entrypoints.websecure.address=:443" # Configuração para entrada HTTPS
-      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=websecure" # Desafio HTTP para Let's Encrypt
-      - "--certificatesresolvers.letsencrypt.acme.email=mateus.caccelli@zencloud.com.br" # Substitua pelo seu email
-      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json" # Armazenamento de certificados
-      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--api.insecure=true"
+      - "--api.dashboard=true"
+      - "--log.level=DEBUG"
+
+      # Entrypoints
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+
+      - "--entrypoints.websecure.address=:443"
+
+      # Let's Encrypt
+      - "--certificatesresolvers.myresolver.acme.email=mateus.caccelli@zencloud.com.br"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+
+      # Docker provider
+      - "--providers.docker=true"
+      - "--providers.docker.watch=true"
+      - "--providers.docker.exposedbydefault=false"
     volumes:
-      - "/var/run/docker.sock:/var/run/docker.sock:ro" # Acesso ao Docker socket
-      - "./letsencrypt:/letsencrypt" # Volume para armazenar certificados
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./letsencrypt:/letsencrypt"
+    labels:
+      - "traefik.enable=true"
+
+      # Dashboard via domínio (⚠️ proteja com auth depois!)
+      - "traefik.http.routers.traefik.rule=Host(`traefik.demo01.harko.ai`)"
+      - "traefik.http.routers.traefik.entrypoints=websecure"
+      - "traefik.http.routers.traefik.service=api@internal"
+      - "traefik.http.routers.traefik.tls.certresolver=myresolver"
+    networks:
+      - traefik
 
   open-webui:
     build:
       context: .
       dockerfile: Dockerfile
-    # image: ghcr.io/open-webui/open-webui:${WEBUI_DOCKER_TAG-main}
     container_name: open-webui
-    volumes:
-      - open-webui:/app/backend/data
-    ports:
-      - "8080:8080"
+    restart: unless-stopped
     environment:
       - 'WEBUI_SECRET_KEY=zJsRn6zPPAkXpzN0P/bXu0qmWioWLWOzHQGVVL7Dr2U='
-    # extra_hosts:
-    #   - host.docker.internal:host-gateway
-    restart: unless-stopped
+    volumes:
+      - open-webui:/app/backend/data
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.open-webui.rule=Host(`demo01.harko.ai`)" # Substitua pelo seu domínio real
+      - "traefik.http.routers.open-webui.rule=Host(`demo01.harko.ai`)"
       - "traefik.http.routers.open-webui.entrypoints=websecure"
-      # - "traefik.http.routers.open-webui.tls.certresolver=letsencrypt"
-      - "traefik.http.services.open-webui.loadbalancer.server.port=8080"
+      - "traefik.http.routers.open-webui.tls.certresolver=myresolver"
+      - "traefik.http.services.open-webui.loadbalancer.server.port=8088"
+
+      # Middleware para forçar header correto de HTTPS
+      - "traefik.http.middlewares.secure-headers.headers.customrequestheaders.X-Forwarded-Proto=https"
+      - "traefik.http.routers.open-webui.middlewares=secure-headers"
+    networks:
+      - traefik
+
 volumes:
-  open-webui: {}
+  open-webui:
+
+networks:
+  traefik:
+    external: true
