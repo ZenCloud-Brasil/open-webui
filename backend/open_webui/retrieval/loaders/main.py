@@ -4,6 +4,7 @@ import ftfy
 import sys
 import json
 
+from azure.identity import DefaultAzureCredential
 from langchain_community.document_loaders import (
     AzureAIDocumentIntelligenceLoader,
     BSHTMLLoader,
@@ -26,6 +27,7 @@ from open_webui.retrieval.loaders.external_document import ExternalDocumentLoade
 
 from open_webui.retrieval.loaders.mistral import MistralLoader
 from open_webui.retrieval.loaders.datalab_marker import DatalabMarkerLoader
+from open_webui.retrieval.loaders.mineru import MinerULoader
 
 
 from open_webui.env import SRC_LOG_LEVELS, GLOBAL_LOG_LEVEL
@@ -147,7 +149,7 @@ class DoclingLoader:
                 )
             }
 
-            params = {"image_export_mode": "placeholder", "table_mode": "accurate"}
+            params = {"image_export_mode": "placeholder"}
 
             if self.params:
                 if self.params.get("do_picture_description"):
@@ -173,13 +175,30 @@ class DoclingLoader:
                             self.params.get("picture_description_api", {})
                         )
 
-                if self.params.get("ocr_engine") and self.params.get("ocr_lang"):
+                params["do_ocr"] = self.params.get("do_ocr")
+
+                params["force_ocr"] = self.params.get("force_ocr")
+
+                if (
+                    self.params.get("do_ocr")
+                    and self.params.get("ocr_engine")
+                    and self.params.get("ocr_lang")
+                ):
                     params["ocr_engine"] = self.params.get("ocr_engine")
                     params["ocr_lang"] = [
                         lang.strip()
                         for lang in self.params.get("ocr_lang").split(",")
                         if lang.strip()
                     ]
+
+                if self.params.get("pdf_backend"):
+                    params["pdf_backend"] = self.params.get("pdf_backend")
+
+                if self.params.get("table_mode"):
+                    params["table_mode"] = self.params.get("table_mode")
+
+                if self.params.get("pipeline"):
+                    params["pipeline"] = self.params.get("pipeline")
 
             endpoint = f"{self.url}/v1/convert/file"
             r = requests.post(endpoint, files=files, data=params)
@@ -209,6 +228,7 @@ class DoclingLoader:
 class Loader:
     def __init__(self, engine: str = "", **kwargs):
         self.engine = engine
+        self.user = kwargs.get("user", None)
         self.kwargs = kwargs
 
     def load(
@@ -245,6 +265,7 @@ class Loader:
                 url=self.kwargs.get("EXTERNAL_DOCUMENT_LOADER_URL"),
                 api_key=self.kwargs.get("EXTERNAL_DOCUMENT_LOADER_API_KEY"),
                 mime_type=file_content_type,
+                user=self.user,
             )
         elif self.engine == "tika" and self.kwargs.get("TIKA_SERVER_URL"):
             if self._is_text_file(file_ext, file_content_type):
@@ -253,7 +274,6 @@ class Loader:
                 loader = TikaLoader(
                     url=self.kwargs.get("TIKA_SERVER_URL"),
                     file_path=file_path,
-                    mime_type=file_content_type,
                     extract_images=self.kwargs.get("PDF_EXTRACT_IMAGES"),
                 )
         elif (
@@ -283,7 +303,7 @@ class Loader:
         ):
             api_base_url = self.kwargs.get("DATALAB_MARKER_API_BASE_URL", "")
             if not api_base_url or api_base_url.strip() == "":
-                api_base_url = "https://www.datalab.to/api/v1"
+                api_base_url = "https://www.datalab.to/api/v1/marker"  # https://github.com/open-webui/open-webui/pull/16867#issuecomment-3218424349
 
             loader = DatalabMarkerLoader(
                 file_path=file_path,
@@ -327,23 +347,37 @@ class Loader:
         elif (
             self.engine == "document_intelligence"
             and self.kwargs.get("DOCUMENT_INTELLIGENCE_ENDPOINT") != ""
-            and self.kwargs.get("DOCUMENT_INTELLIGENCE_KEY") != ""
             and (
-                file_ext in ["pdf", "xls", "xlsx", "docx", "ppt", "pptx"]
+                file_ext in ["pdf", "docx", "ppt", "pptx"]
                 or file_content_type
                 in [
-                    "application/vnd.ms-excel",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     "application/vnd.ms-powerpoint",
                     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 ]
             )
         ):
-            loader = AzureAIDocumentIntelligenceLoader(
+            if self.kwargs.get("DOCUMENT_INTELLIGENCE_KEY") != "":
+                loader = AzureAIDocumentIntelligenceLoader(
+                    file_path=file_path,
+                    api_endpoint=self.kwargs.get("DOCUMENT_INTELLIGENCE_ENDPOINT"),
+                    api_key=self.kwargs.get("DOCUMENT_INTELLIGENCE_KEY"),
+                )
+            else:
+                loader = AzureAIDocumentIntelligenceLoader(
+                    file_path=file_path,
+                    api_endpoint=self.kwargs.get("DOCUMENT_INTELLIGENCE_ENDPOINT"),
+                    azure_credential=DefaultAzureCredential(),
+                )
+        elif self.engine == "mineru" and file_ext in [
+            "pdf"
+        ]:  # MinerU currently only supports PDF
+            loader = MinerULoader(
                 file_path=file_path,
-                api_endpoint=self.kwargs.get("DOCUMENT_INTELLIGENCE_ENDPOINT"),
-                api_key=self.kwargs.get("DOCUMENT_INTELLIGENCE_KEY"),
+                api_mode=self.kwargs.get("MINERU_API_MODE", "local"),
+                api_url=self.kwargs.get("MINERU_API_URL", "http://localhost:8000"),
+                api_key=self.kwargs.get("MINERU_API_KEY", ""),
+                params=self.kwargs.get("MINERU_PARAMS", {}),
             )
         elif (
             self.engine == "mistral_ocr"
@@ -352,16 +386,9 @@ class Loader:
             in ["pdf"]  # Mistral OCR currently only supports PDF and images
         ):
             loader = MistralLoader(
-                api_key=self.kwargs.get("MISTRAL_OCR_API_KEY"), file_path=file_path
-            )
-        elif (
-            self.engine == "external"
-            and self.kwargs.get("MISTRAL_OCR_API_KEY") != ""
-            and file_ext
-            in ["pdf"]  # Mistral OCR currently only supports PDF and images
-        ):
-            loader = MistralLoader(
-                api_key=self.kwargs.get("MISTRAL_OCR_API_KEY"), file_path=file_path
+                base_url=self.kwargs.get("MISTRAL_OCR_API_BASE_URL"),
+                api_key=self.kwargs.get("MISTRAL_OCR_API_KEY"),
+                file_path=file_path,
             )
         else:
             if file_ext == "pdf":
