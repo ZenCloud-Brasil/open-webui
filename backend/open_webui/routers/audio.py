@@ -881,7 +881,7 @@ def transcription_handler(request, file_path, metadata, user=None):
 
             raise HTTPException(
                 status_code=status_code,
-                detail=detail if detail else "Open WebUI: Server Connection Error",
+                detail=detail if detail else "HarkoAI: Server Connection Error",
             )
 
     elif request.app.state.config.STT_ENGINE == "mistral":
